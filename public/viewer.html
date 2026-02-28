@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafeRide - Canli Izleme</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #050510;
+      color: #fff;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid #1e1e2d;
+    }
+    .header h1 {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    .header h1 .dot.connected { background: #10b981; }
+    .status-badge {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+    .status-badge.offline { background: #1e1e2d; color: #6b7280; }
+    .status-badge.online { background: #065f46; color: #10b981; }
+
+    /* Main layout */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr auto;
+      gap: 16px;
+      padding: 16px 24px;
+      height: calc(100vh - 65px);
+    }
+
+    /* Cards */
+    .card {
+      background: #0c0c1e;
+      border: 1px solid #1e1e2d;
+      border-radius: 24px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #1e1e2d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-title {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      color: #6b7280;
+    }
+
+    /* Video */
+    .video-card { position: relative; }
+    #remoteVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+    .video-placeholder {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      color: #374151;
+    }
+    .video-placeholder svg { opacity: 0.3; }
+    .live-badge {
+      position: absolute;
+      top: 60px;
+      left: 20px;
+      background: #ef4444;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 900;
+      display: none;
+      align-items: center;
+      gap: 4px;
+      z-index: 10;
+    }
+    .live-badge .pulse {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #fff;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* Map */
+    .map-card #map {
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* Controls */
+    .controls {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .control-group {
+      background: #0c0c1e;
+      border: 1px solid #1e1e2d;
+      border-radius: 16px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .control-group label {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #6b7280;
+    }
+    .control-group input, .control-group select {
+      background: #1e1e2d;
+      border: none;
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      outline: none;
+    }
+    .btn {
+      padding: 10px 24px;
+      border: none;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Info bar */
+    .info-bar {
+      flex: 1;
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .info-label {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #6b7280;
+    }
+    .info-value {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* Streams list */
+    .streams-list {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .stream-chip {
+      background: #1e1e2d;
+      padding: 6px 14px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+    }
+    .stream-chip:hover { border-color: #6366f1; }
+    .stream-chip.active { background: #6366f1; }
+
+    /* Log */
+    .log-area {
+      grid-column: 1 / -1;
+      background: #0c0c1e;
+      border: 1px solid #1e1e2d;
+      border-radius: 16px;
+      padding: 12px 16px;
+      max-height: 80px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .log-line {
+      font-size: 11px;
+      font-family: 'Courier New', monospace;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>
+      <div class="dot" id="connDot"></div>
+      SAFERIDE IZLEME PANELI
+    </h1>
+    <div class="status-badge offline" id="statusBadge">BAGLANTI BEKLENIYOR</div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Video -->
+    <div class="card video-card">
+      <div class="card-header">
+        <span class="card-title">CANLI GORUNTU</span>
+        <span id="resolutionInfo" style="font-size:11px;color:#6b7280;">---</span>
+      </div>
+      <div class="live-badge" id="liveBadge">
+        <div class="pulse"></div>
+        CANLI
+      </div>
+      <video id="remoteVideo" autoplay playsinline muted style="display:none;"></video>
+      <div class="video-placeholder" id="videoPlaceholder">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polygon points="23 7 16 12 23 17 23 7"></polygon>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+        </svg>
+        <span style="font-size:12px;font-weight:600;">Arac secin ve izlemeye baslayin</span>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div class="card map-card">
+      <div class="card-header">
+        <span class="card-title">GPS KONUM</span>
+        <span id="coordsInfo" style="font-size:11px;color:#6b7280;">---</span>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="control-group">
+        <label>ARAC</label>
+        <input type="text" id="vehicleInput" value="DXB-BYD-01" placeholder="Arac ID" />
+      </div>
+
+      <div class="control-group">
+        <label>AKTIF YAYINLAR</label>
+        <div class="streams-list" id="streamsList">
+          <span style="color:#6b7280;font-size:11px;">Yukleniyor...</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="watchBtn" onclick="requestStream()">IZLEMEYE BASLA</button>
+      <button class="btn btn-danger" id="stopBtn" onclick="stopWatching()" style="display:none;">DURDUR</button>
+
+      <div class="info-bar">
+        <div class="info-item">
+          <span class="info-label">HIZ</span>
+          <span class="info-value" id="speedVal">--- km/h</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">YON</span>
+          <span class="info-value" id="headingVal">---</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">SON GUNCELLEME</span>
+          <span class="info-value" id="lastUpdate">---</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-area" id="logArea">
+      <div class="log-line">Sistem baslatiliyor...</div>
+    </div>
+  </div>
+
+<script>
+  // ==========================================
+  // CONFIG
+  // ==========================================
+  const WS_URL = window.location.origin;
+  const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+
+  // ==========================================
+  // STATE
+  // ==========================================
+  let socket = null;
+  let peerConnection = null;
+  let viewerId = 'viewer-' + Math.random().toString(36).substr(2, 9);
+  let currentVehicleId = null;
+  let map = null;
+  let marker = null;
+  let routePath = null;
+  let routePoints = [];
+
+  // ==========================================
+  // DOM
+  // ==========================================
+  const remoteVideo = document.getElementById('remoteVideo');
+  const videoPlaceholder = document.getElementById('videoPlaceholder');
+  const liveBadge = document.getElementById('liveBadge');
+  const connDot = document.getElementById('connDot');
+  const statusBadge = document.getElementById('statusBadge');
+  const streamsList = document.getElementById('streamsList');
+  const watchBtn = document.getElementById('watchBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const vehicleInput = document.getElementById('vehicleInput');
+  const logArea = document.getElementById('logArea');
+
+  // ==========================================
+  // LOGGING
+  // ==========================================
+  function addLog(msg) {
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.textContent = `${time} | ${msg}`;
+    logArea.prepend(line);
+    if (logArea.children.length > 50) logArea.removeChild(logArea.lastChild);
+  }
+
+  // ==========================================
+  // MAP INIT
+  // ==========================================
+  function initMap() {
+    map = L.map('map', {
+      zoomControl: false,
+    }).setView([25.2048, 55.2708], 13); // Dubai
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap & CartoDB',
+      maxZoom: 19,
+    }).addTo(map);
+
+    routePath = L.polyline([], { color: '#6366f1', weight: 3, opacity: 0.7 }).addTo(map);
+  }
+
+  function updateMap(lat, lng, speed, heading) {
+    if (!map) return;
+
+    const pos = [lat, lng];
+
+    if (!marker) {
+      const icon = L.divIcon({
+        html: `<div style="
+          width:16px;height:16px;
+          background:#6366f1;
+          border:3px solid #fff;
+          border-radius:50%;
+          box-shadow:0 0 12px rgba(99,102,241,0.6);
+        "></div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+        className: '',
+      });
+      marker = L.marker(pos, { icon }).addTo(map);
+    } else {
+      marker.setLatLng(pos);
+    }
+
+    routePoints.push(pos);
+    if (routePoints.length > 500) routePoints.shift();
+    routePath.setLatLngs(routePoints);
+
+    map.panTo(pos);
+
+    document.getElementById('coordsInfo').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    document.getElementById('speedVal').textContent = `${(speed * 3.6).toFixed(0)} km/h`;
+    document.getElementById('headingVal').textContent = `${heading?.toFixed(0) || 0}\u00B0`;
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+  }
+
+  // ==========================================
+  // SOCKET.IO
+  // ==========================================
+  function connectSocket() {
+    socket = io(WS_URL, { transports: ['websocket'] });
+
+    socket.on('connect', () => {
+      connDot.classList.add('connected');
+      statusBadge.className = 'status-badge online';
+      statusBadge.textContent = 'BAGLI';
+      addLog('Sunucuya baglandi');
+
+      // Request active streams list
+      socket.emit('webrtc:stream-list');
+    });
+
+    socket.on('disconnect', () => {
+      connDot.classList.remove('connected');
+      statusBadge.className = 'status-badge offline';
+      statusBadge.textContent = 'BAGLANTI KESILDI';
+      addLog('Baglanti kesildi');
+    });
+
+    // Active streams list
+    socket.on('webrtc:stream-list', (data) => {
+      renderStreamsList(data.activeStreams || []);
+    });
+
+    // Stream stopped notification
+    socket.on('webrtc:stop-stream', (data) => {
+      if (data.vehicleId === currentVehicleId) {
+        addLog(`Arac ${data.vehicleId} yayini durdurdu`);
+        stopWatching();
+      }
+    });
+
+    // WebRTC: Receive offer (targeted to this viewer)
+    socket.on(`webrtc:offer:${viewerId}`, async (data) => {
+      addLog(`Offer alindi: ${data.vehicleId}`);
+      await handleOffer(data);
+    });
+
+    // WebRTC: Receive ICE candidate (targeted to this viewer)
+    socket.on(`webrtc:ice-candidate:${viewerId}`, async (data) => {
+      if (peerConnection && data.candidate) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (e) {
+          console.error('ICE candidate error:', e);
+        }
+      }
+    });
+
+    // GPS: Subscribe to location updates
+    socket.on('location:data', (data) => {
+      const lat = data.position?.lat ?? data.position?.latitude;
+      const lng = data.position?.lng ?? data.position?.longitude;
+      if (lat && lng) {
+        updateMap(lat, lng, data.speed || 0, data.heading || 0);
+      }
+    });
+  }
+
+  // ==========================================
+  // STREAMS LIST UI
+  // ==========================================
+  function renderStreamsList(streams) {
+    if (streams.length === 0) {
+      streamsList.innerHTML = '<span style="color:#6b7280;font-size:11px;">Aktif yayin yok</span>';
+      return;
+    }
+
+    streamsList.innerHTML = '';
+    streams.forEach(id => {
+      const chip = document.createElement('div');
+      chip.className = 'stream-chip' + (id === currentVehicleId ? ' active' : '');
+      chip.textContent = id;
+      chip.onclick = () => {
+        vehicleInput.value = id;
+        requestStream();
+      };
+      streamsList.appendChild(chip);
+    });
+  }
+
+  // ==========================================
+  // WebRTC: REQUEST STREAM
+  // ==========================================
+  function requestStream() {
+    const vehicleId = vehicleInput.value.trim();
+    if (!vehicleId) return;
+
+    // Cleanup previous
+    if (peerConnection) stopWatching();
+
+    currentVehicleId = vehicleId;
+    addLog(`Yayin istegi gonderiliyor: ${vehicleId}`);
+
+    // Subscribe to GPS data for this vehicle
+    socket.emit('location:subscribe', { vehicleId });
+
+    // Create peer connection
+    peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+    peerConnection.ontrack = (event) => {
+      addLog('Video stream aliniyor!');
+      remoteVideo.srcObject = event.streams[0];
+      remoteVideo.style.display = 'block';
+      videoPlaceholder.style.display = 'none';
+      liveBadge.style.display = 'flex';
+
+      // Show resolution when metadata loaded
+      remoteVideo.onloadedmetadata = () => {
+        document.getElementById('resolutionInfo').textContent =
+          `${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`;
+      };
+    };
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('webrtc:ice-candidate', {
+          vehicleId: currentVehicleId,
+          viewerId: viewerId,
+          candidate: event.candidate.toJSON(),
+        });
+      }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      addLog(`Baglanti durumu: ${peerConnection.connectionState}`);
+      if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+        addLog('Baglanti koptu');
+      }
+    };
+
+    // Request stream from the vehicle
+    socket.emit('webrtc:request-stream', {
+      vehicleId: currentVehicleId,
+      viewerId: viewerId,
+    });
+
+    watchBtn.style.display = 'none';
+    stopBtn.style.display = 'inline-block';
+  }
+
+  // ==========================================
+  // WebRTC: HANDLE OFFER
+  // ==========================================
+  async function handleOffer(data) {
+    if (!peerConnection) return;
+
+    try {
+      await peerConnection.setRemoteDescription(
+        new RTCSessionDescription({ type: 'offer', sdp: data.sdp })
+      );
+
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      socket.emit('webrtc:answer', {
+        vehicleId: data.vehicleId,
+        viewerId: viewerId,
+        sdp: answer.sdp,
+      });
+
+      addLog('Answer gonderildi');
+    } catch (e) {
+      addLog('Offer isleme hatasi: ' + e.message);
+      console.error(e);
+    }
+  }
+
+  // ==========================================
+  // STOP WATCHING
+  // ==========================================
+  function stopWatching() {
+    if (peerConnection) {
+      peerConnection.close();
+      peerConnection = null;
+    }
+
+    remoteVideo.srcObject = null;
+    remoteVideo.style.display = 'none';
+    videoPlaceholder.style.display = 'flex';
+    liveBadge.style.display = 'none';
+    document.getElementById('resolutionInfo').textContent = '---';
+
+    if (currentVehicleId) {
+      socket.emit('location:unsubscribe', { vehicleId: currentVehicleId });
+    }
+
+    currentVehicleId = null;
+    routePoints = [];
+    if (routePath) routePath.setLatLngs([]);
+    if (marker) { map.removeLayer(marker); marker = null; }
+
+    watchBtn.style.display = 'inline-block';
+    stopBtn.style.display = 'none';
+
+    addLog('Izleme durduruldu');
+  }
+
+  // ==========================================
+  // INIT
+  // ==========================================
+  window.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    connectSocket();
+    addLog(`Viewer ID: ${viewerId}`);
+  });
+</script>
+</body>
+</html>
