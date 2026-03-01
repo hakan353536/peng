@@ -49,6 +49,14 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     const lat = (position as any).lat ?? position.latitude;
     const lng = (position as any).lng ?? position.longitude;
     console.log(`[GPS] ${vehicleId} | ${lat?.toFixed(4)}, ${lng?.toFixed(4)} | ${speed} km/h`);
+
+    // Auto-register as active streamer if not already registered
+    if (vehicleId && !this.activeStreamers.has(vehicleId)) {
+      this.activeStreamers.set(vehicleId, client.id);
+      console.log(`[AUTO] Stream auto-registered: ${vehicleId}`);
+      this.server.emit(SocketEvents.WEBRTC_STREAM_LIST, { activeStreams: Array.from(this.activeStreamers.keys()) });
+    }
+
     // Room-based ve global broadcast
     this.server.to(`vehicle:${vehicleId}`).emit(SocketEvents.LOCATION_DATA, data);
     this.server.to('fleet:global').emit(SocketEvents.LOCATION_DATA, data);
