@@ -332,6 +332,21 @@
   const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ];
 
   // ==========================================
@@ -528,16 +543,45 @@
     peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     peerConnection.ontrack = (event) => {
-      addLog('Video stream aliniyor!');
-      remoteVideo.srcObject = event.streams[0];
+      addLog('Medya kanali yakalandi: ' + event.track.kind);
+      console.log('Track event:', event);
+      
+      if (!remoteVideo.srcObject) {
+        remoteVideo.srcObject = new MediaStream();
+        addLog('Yeni medya akisi olusturuldu');
+      }
+      
+      remoteVideo.srcObject.addTrack(event.track);
+
       remoteVideo.style.display = 'block';
       videoPlaceholder.style.display = 'none';
       liveBadge.style.display = 'flex';
 
-      // Show resolution when metadata loaded
+      // Ensure attributes for autoplay
+      remoteVideo.muted = true;
+      remoteVideo.setAttribute('playsinline', '');
+      remoteVideo.setAttribute('autoplay', '');
+
+      // Try to play immediately
+      const playPromise = remoteVideo.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          addLog('Video oynatiliyor');
+        }).catch(error => {
+          addLog('Oynatma baslatilamadi: ' + error.message);
+          // Show a click-to-play overlay if needed
+          console.warn('Autoplay prevented:', error);
+        });
+      }
+
       remoteVideo.onloadedmetadata = () => {
+        addLog(`Yayin Ozellikleri: ${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`);
         document.getElementById('resolutionInfo').textContent =
           `${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`;
+      };
+
+      remoteVideo.onloadeddata = () => {
+        addLog('Gorsel veri akisi basladi');
       };
     };
 
