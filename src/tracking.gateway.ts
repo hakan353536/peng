@@ -49,16 +49,20 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     const lat = (position as any).lat ?? position.latitude;
     const lng = (position as any).lng ?? position.longitude;
     console.log(`[GPS] ${vehicleId} | ${lat?.toFixed(4)}, ${lng?.toFixed(4)} | ${speed} km/h`);
+    // Room-based ve global broadcast
     this.server.to(`vehicle:${vehicleId}`).emit(SocketEvents.LOCATION_DATA, data);
+    this.server.to('fleet:global').emit(SocketEvents.LOCATION_DATA, data);
     if (data.tripId) {
       this.server.to(`trip:${data.tripId}`).emit(SocketEvents.LOCATION_DATA, data);
     }
   }
 
   @SubscribeMessage(SocketEvents.LOCATION_SUBSCRIBE)
-  handleSubscribe(@MessageBody() data: { vehicleId?: string; tripId?: string }, @ConnectedSocket() client: Socket) {
+  handleSubscribe(@MessageBody() data: { vehicleId?: string; tripId?: string; fleetId?: string }, @ConnectedSocket() client: Socket) {
+    if (data.fleetId) client.join(`fleet:${data.fleetId}`);
     if (data.vehicleId) client.join(`vehicle:${data.vehicleId}`);
     if (data.tripId) client.join(`trip:${data.tripId}`);
+    console.log(`[SUB] ${client.id} joined: ${data.fleetId ? 'fleet:' + data.fleetId : ''} ${data.vehicleId ? 'vehicle:' + data.vehicleId : ''}`);
   }
 
   @SubscribeMessage(SocketEvents.LOCATION_UNSUBSCRIBE)
