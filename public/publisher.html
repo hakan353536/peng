@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>SafeRide - Yayıncı (Kamera Test)</title>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #050510; color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; gap: 20px; padding: 20px;
+    }
+    h1 { font-size: 20px; color: #6366f1; }
+    video {
+      width: 640px; height: 480px; border-radius: 16px;
+      background: #000; border: 2px solid #1e1e2d;
+    }
+    .btn {
+      padding: 14px 32px; border: none; border-radius: 12px;
+      font-size: 16px; font-weight: 800; cursor: pointer;
+      background: #10b981; color: #fff; transition: all 0.2s;
+    }
+    .btn:hover { background: #059669; }
+    .btn.stop { background: #ef4444; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #log {
+      background: #0c0c1e; border: 1px solid #1e1e2d; border-radius: 12px;
+      padding: 16px; width: 640px; max-height: 200px; overflow-y: auto;
+      font-family: monospace; font-size: 12px; color: #6b7280;
+    }
+    .status { font-size: 14px; color: #6b7280; }
+    .status.active { color: #10b981; }
+  </style>
+</head>
+<body>
+  <h1>📹 SafeRide Kamera Yayıncı (Test)</h1>
+  <p class="status" id="status">Bağlantı bekleniyor...</p>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <div style="display:flex;gap:12px;">
+    <button class="btn" id="startBtn" onclick="startPublishing()">YAYINI BAŞLAT</button>
+    <button class="btn stop" id="stopBtn" onclick="stopPublishing()" disabled>YAYINI DURDUR</button>
+  </div>
+  <div id="log"></div>
+
+<script>
+  const VEHICLE_ID = 'vehicle-001';
+  const LIVEKIT_URL = 'wss://peng-cantak-3avcr64w.livekit.cloud';
+  const WS_URL = window.location.origin;
+
+  let room = null;
+  let socket = null;
+  let localStream = null;
+
+  function log(msg) {
+    const time = new Date().toLocaleTimeString();
+    const el = document.getElementById('log');
+    el.innerHTML = `<div>${time} | ${msg}</div>` + el.innerHTML;
+  }
+
+  // Connect Socket.IO
+  socket = io(WS_URL, { transports: ['websocket'] });
+  socket.on('connect', () => {
+    log('Socket.IO: Sunucuya bağlandı ✅');
+    document.getElementById('status').textContent = 'Sunucuya bağlı';
+    document.getElementById('status').className = 'status active';
+  });
+
+  async function startPublishing() {
+    try {
+      document.getElementById('startBtn').disabled = true;
+      log('Kamera başlatılıyor...');
+
+      // 1. Get camera
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, frameRate: 15 },
+        audio: true,
+      });
+      document.getElementById('localVideo').srcObject = localStream;
+      log('Kamera açıldı ✅');
+
+      // 2. Fetch token as publisher
+      log('LiveKit token alınıyor...');
+      const resp = await fetch(`/livekit/token?room=${VEHICLE_ID}&participant=${VEHICLE_ID}&role=publisher`);
+      if (!resp.ok) throw new Error('Token alınamadı: ' + resp.statusText);
+      const { token } = await resp.json();
+      log('Token alındı ✅');
+
+      // 3. Connect LiveKit room
+      room = new LivekitClient.Room();
+      await room.connect(LIVEKIT_URL, token);
+      log('LiveKit odasına bağlanıldı ✅');
+
+      // 4. Publish tracks
+      const videoTrack = localStream.getVideoTracks()[0];
+      const audioTrack = localStream.getAudioTracks()[0];
+
+      if (videoTrack) {
+        await room.localParticipant.publishTrack(videoTrack);
+        log('Video track yayınlandı ✅');
+      }
+      if (audioTrack) {
+        await room.localParticipant.publishTrack(audioTrack);
+        log('Ses track yayınlandı ✅');
+      }
+
+      // 5. Notify server
+      socket.emit('webrtc:start-stream', { vehicleId: VEHICLE_ID });
+      log('Sunucuya yayın bildirimi gönderildi ✅');
+
+      document.getElementById('status').textContent = '🔴 CANLI YAYIN AKTİF';
+      document.getElementById('stopBtn').disabled = false;
+
+      // 6. Start sending fake GPS (from browser location or fixed coords)
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition((pos) => {
+          socket.emit('location:update', {
+            vehicleId: VEHICLE_ID,
+            position: { lat: pos.coords.latitude, lng: pos.coords.longitude },
+            speed: pos.coords.speed || 0,
+            heading: pos.coords.heading || 0,
+            recordedAt: new Date(),
+          });
+        }, null, { enableHighAccuracy: true, maximumAge: 2000 });
+        log('GPS takibi başlatıldı ✅');
+      }
+
+      log('🎬 Yayın başarıyla başlatıldı!');
+
+    } catch (err) {
+      log('HATA: ' + err.message);
+      document.getElementById('startBtn').disabled = false;
+    }
+  }
+
+  function stopPublishing() {
+    if (room) { room.disconnect(); room = null; }
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+    }
+    socket.emit('webrtc:stop-stream', { vehicleId: VEHICLE_ID });
+    document.getElementById('localVideo').srcObject = null;
+    document.getElementById('status').textContent = 'Yayın durduruldu';
+    document.getElementById('status').className = 'status';
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    log('Yayın durduruldu');
+  }
+</script>
+</body>
+</html>
